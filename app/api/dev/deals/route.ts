@@ -8,6 +8,7 @@ import {
   type DraftProduct,
 } from "@/src/hotbags/schema";
 import { createDealSession, getDealSession, logEvent, updateDealSession } from "@/src/platform/db";
+import type { AutomationEventEnvelope } from "@/src/platform/types";
 
 export const runtime = "nodejs";
 
@@ -104,7 +105,7 @@ function buildEvent(args: {
   deal_id: string;
   type: string;
   data: Record<string, unknown>;
-}) {
+}): AutomationEventEnvelope {
   return {
     event_id: crypto.randomUUID(),
     source: "internal",
