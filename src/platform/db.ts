@@ -179,6 +179,7 @@ export async function updateDealSession(args: {
   draft_product?: unknown;
   increment_version?: boolean;
   expires_at?: string;
+  updated_at?: string;
 }): Promise<void> {
   const sb = supabaseAdmin();
 
@@ -188,6 +189,7 @@ export async function updateDealSession(args: {
   if (args.source_message_ids) patch.source_message_ids = args.source_message_ids;
   if (args.draft_product !== undefined) patch.draft_product = args.draft_product;
   if (args.expires_at) patch.expires_at = args.expires_at;
+  if (args.updated_at) patch.updated_at = args.updated_at;
 
   if (args.increment_version) {
     // Atomic increment
