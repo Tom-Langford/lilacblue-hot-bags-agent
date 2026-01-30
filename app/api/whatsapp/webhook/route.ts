@@ -343,7 +343,7 @@ async function processWebhookPayload(payload: unknown) {
     };
 
     try {
-      console.info("wa_webhook persist_start", { deal_id, message_id: message.message_id });
+      console.info("wa_webhook before_logEvent", { deal_id, message_id: message.message_id });
       try {
         await Promise.race([
           logEvent(envelope),
@@ -374,7 +374,7 @@ async function processWebhookPayload(payload: unknown) {
       const expiresAt = new Date(Date.now() + 15 * 60 * 1000).toISOString();
 
       if (!existing) {
-        console.info("wa_webhook session_write_start", { deal_id, mode: "create" });
+        console.info("wa_webhook before_session_write", { deal_id });
         const draft = DraftProductSchema.parse(
           buildStubDraft(source_text, message.message_id, message.from)
         );
@@ -401,7 +401,7 @@ async function processWebhookPayload(payload: unknown) {
         });
         console.info("wa_webhook session_saved", { deal_id, draft_version: 1 });
       } else {
-        console.info("wa_webhook session_write_start", { deal_id, mode: "update" });
+        console.info("wa_webhook before_session_write", { deal_id });
         const draft = DraftProductSchema.parse(existing.draft_product ?? {});
         const provenance = draft.provenance ?? {
           source_text: "",
@@ -505,16 +505,7 @@ export async function POST(request: Request) {
 
   try {
     const payload = JSON.parse(rawBody) as unknown;
-    void processWebhookPayload(payload).catch(async (error) => {
-      const message = error instanceof Error ? error.message : "Failed to process webhook payload";
-      await logError({
-        correlation_id: "unknown",
-        service: "whatsapp-webhook",
-        error_code: "whatsapp_process_failed",
-        message,
-        details: { error },
-      });
-    });
+    await processWebhookPayload(payload);
   } catch (error) {
     const message = error instanceof Error ? error.message : "Invalid webhook payload";
     await logError({
