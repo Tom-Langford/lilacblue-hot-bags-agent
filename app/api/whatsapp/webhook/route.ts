@@ -292,6 +292,12 @@ function verifySignature(rawBody: string, signatureHeader: string, secret: strin
   }
 }
 
+function timeoutPromise(ms: number, message: string): Promise<never> {
+  return new Promise((_, reject) => {
+    setTimeout(() => reject(new Error(message)), ms);
+  });
+}
+
 async function processWebhookPayload(payload: unknown) {
   const supabaseUrl = process.env.SUPABASE_URL;
   if (supabaseUrl) {
@@ -338,14 +344,37 @@ async function processWebhookPayload(payload: unknown) {
 
     try {
       console.info("wa_webhook persist_start", { deal_id, message_id: message.message_id });
-      await logEvent(envelope);
-      console.info("wa_webhook event_logged", { event_id: message.message_id });
+      try {
+        await Promise.race([
+          logEvent(envelope),
+          timeoutPromise(3000, "logEvent timeout"),
+        ]);
+        console.info("wa_webhook event_logged", { event_id: message.message_id });
+      } catch (error) {
+        const messageText = error instanceof Error ? error.message : "logEvent failed";
+        console.error("wa_webhook persist_error", {
+          stage: "logEvent",
+          deal_id,
+          message_id: message.message_id,
+          error: messageText,
+        });
+        await logError({
+          correlation_id: deal_id,
+          event_id: message.message_id,
+          service: "whatsapp-webhook",
+          error_code: "whatsapp_log_event_failed",
+          message: messageText,
+          details: { error: error instanceof Error ? error.stack : error },
+        });
+        return;
+      }
 
       const existing = await getDealSession(deal_id);
       console.info("wa_webhook session_found", { found: !!existing });
       const expiresAt = new Date(Date.now() + 15 * 60 * 1000).toISOString();
 
       if (!existing) {
+        console.info("wa_webhook session_write_start", { deal_id, mode: "create" });
         const draft = DraftProductSchema.parse(
           buildStubDraft(source_text, message.message_id, message.from)
         );
@@ -372,6 +401,7 @@ async function processWebhookPayload(payload: unknown) {
         });
         console.info("wa_webhook session_saved", { deal_id, draft_version: 1 });
       } else {
+        console.info("wa_webhook session_write_start", { deal_id, mode: "update" });
         const draft = DraftProductSchema.parse(existing.draft_product ?? {});
         const provenance = draft.provenance ?? {
           source_text: "",
