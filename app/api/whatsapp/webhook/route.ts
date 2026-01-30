@@ -293,6 +293,20 @@ function verifySignature(rawBody: string, signatureHeader: string, secret: strin
 }
 
 async function processWebhookPayload(payload: unknown) {
+  const supabaseUrl = process.env.SUPABASE_URL;
+  if (supabaseUrl) {
+    try {
+      console.info("wa_webhook env", {
+        node_env: process.env.NODE_ENV,
+        supabase_url: new URL(supabaseUrl).host,
+      });
+    } catch {
+      console.info("wa_webhook env", { node_env: process.env.NODE_ENV, supabase_url: "invalid" });
+    }
+  } else {
+    console.info("wa_webhook env", { node_env: process.env.NODE_ENV, supabase_url: "missing" });
+  }
+
   const values = extractMessageValues(payload);
   console.info("wa_webhook values=", values.length);
   const messages = extractMessages(payload);
@@ -323,9 +337,12 @@ async function processWebhookPayload(payload: unknown) {
     };
 
     try {
+      console.info("wa_webhook persist_start", { deal_id, message_id: message.message_id });
       await logEvent(envelope);
+      console.info("wa_webhook event_logged", { event_id: message.message_id });
 
       const existing = await getDealSession(deal_id);
+      console.info("wa_webhook session_found", { found: !!existing });
       const expiresAt = new Date(Date.now() + 15 * 60 * 1000).toISOString();
 
       if (!existing) {
@@ -353,6 +370,7 @@ async function processWebhookPayload(payload: unknown) {
           draft_product: draftWithCheck,
           expires_at: expiresAt,
         });
+        console.info("wa_webhook session_saved", { deal_id, draft_version: 1 });
       } else {
         const draft = DraftProductSchema.parse(existing.draft_product ?? {});
         const provenance = draft.provenance ?? {
@@ -392,11 +410,18 @@ async function processWebhookPayload(payload: unknown) {
           source_message_ids: nextMessageIds,
           updated_at: new Date().toISOString(),
         });
+        console.info("wa_webhook session_saved", { deal_id, draft_version: existing.draft_version });
       }
     } catch (error) {
       const messageText = error instanceof Error ? error.message : "Failed to process WhatsApp message";
+      console.error("wa_webhook persist_error", {
+        deal_id,
+        message_id: message.message_id,
+        error: messageText,
+      });
       await logError({
         correlation_id: deal_id,
+        event_id: message.message_id,
         service: "whatsapp-webhook",
         error_code: "whatsapp_process_failed",
         message: messageText,
