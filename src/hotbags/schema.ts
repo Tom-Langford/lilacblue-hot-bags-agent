@@ -162,6 +162,7 @@ export const DraftProductSchema = z.object({
     source_text: z.string().default(""),
     source_message_id: z.string().optional(),
     source_chat_id: z.string().optional(),
+    latest_check: z.unknown().optional(),
   }),
 });
 
