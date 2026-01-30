@@ -1,6 +1,5 @@
 import { NextResponse } from "next/server";
 import crypto from "crypto";
-import { z } from "zod";
 import { buildCheckMessage } from "@/src/hotbags/checkMessages";
 import {
   BagStyleEnum,
@@ -20,33 +19,9 @@ type ExtractedMessage = {
   type: string;
   text_body: string | null;
   image_id: string | null;
-  raw: Record<string, unknown>;
+  raw_message: Record<string, unknown>;
+  raw_value: Record<string, unknown>;
 };
-
-const WebhookSchema = z.object({
-  entry: z.array(
-    z.object({
-      changes: z.array(
-        z.object({
-          value: z.object({
-            messages: z
-              .array(
-                z.object({
-                  id: z.string(),
-                  from: z.string(),
-                  timestamp: z.string(),
-                  type: z.string(),
-                  text: z.object({ body: z.string() }).optional(),
-                  image: z.object({ id: z.string() }).optional(),
-                })
-              )
-              .optional(),
-          }),
-        })
-      ),
-    })
-  ),
-});
 
 function buildEvent(args: {
   correlation_id: string;
@@ -70,30 +45,78 @@ function toIsoFromSeconds(seconds: string): string {
 }
 
 function buildCorrelationId(from: string, messageId: string): string {
-  return `wa_${from}_${messageId.slice(0, 10)}`;
+  return `wa_${from}_${messageId}`;
+}
+
+function extractMessageValues(payload: unknown): Record<string, unknown>[] {
+  const values: Record<string, unknown>[] = [];
+
+  if (payload && typeof payload === "object" && "entry" in payload) {
+    const entry = (payload as { entry?: unknown }).entry;
+    if (Array.isArray(entry)) {
+      for (const item of entry) {
+        const changes = (item as { changes?: unknown }).changes;
+        if (Array.isArray(changes)) {
+          for (const change of changes) {
+            const value = (change as { value?: unknown }).value;
+            if (value && typeof value === "object") {
+              values.push(value as Record<string, unknown>);
+            }
+          }
+        }
+      }
+      return values;
+    }
+  }
+
+  if (payload && typeof payload === "object") {
+    const field = (payload as { field?: unknown }).field;
+    const value = (payload as { value?: unknown }).value;
+    if (field === "messages" && value && typeof value === "object") {
+      return [value as Record<string, unknown>];
+    }
+  }
+
+  return values;
 }
 
 function extractMessages(payload: unknown): ExtractedMessage[] {
-  const parsed = WebhookSchema.safeParse(payload);
-  if (!parsed.success) return [];
-
+  const values = extractMessageValues(payload);
   const messages: ExtractedMessage[] = [];
-  for (const entry of parsed.data.entry) {
-    for (const change of entry.changes) {
-      const list = change.value.messages ?? [];
-      for (const message of list) {
-        messages.push({
-          message_id: message.id,
-          from: message.from,
-          timestamp: message.timestamp,
-          type: message.type,
-          text_body: message.type === "text" ? message.text?.body ?? null : null,
-          image_id: message.type === "image" ? message.image?.id ?? null : null,
-          raw: message as unknown as Record<string, unknown>,
-        });
-      }
+
+  for (const value of values) {
+    const list = Array.isArray(value.messages) ? value.messages : [];
+    for (const rawMessage of list) {
+      if (!rawMessage || typeof rawMessage !== "object") continue;
+      const message = rawMessage as Record<string, unknown>;
+      const message_id = typeof message.id === "string" ? message.id : "";
+      const from = typeof message.from === "string" ? message.from : "";
+      const timestamp = typeof message.timestamp === "string" ? message.timestamp : "";
+      const type = typeof message.type === "string" ? message.type : "";
+      if (!message_id || !from || !timestamp || !type) continue;
+
+      const text_body =
+        type === "text" && typeof (message.text as { body?: unknown } | undefined)?.body === "string"
+          ? (message.text as { body: string }).body
+          : null;
+      const image_id =
+        type === "image" && typeof (message.image as { id?: unknown } | undefined)?.id === "string"
+          ? (message.image as { id: string }).id
+          : null;
+
+      messages.push({
+        message_id,
+        from,
+        timestamp,
+        type,
+        text_body,
+        image_id,
+        raw_message: message,
+        raw_value: value,
+      });
     }
   }
+
   return messages;
 }
 
@@ -269,8 +292,15 @@ function verifySignature(rawBody: string, signatureHeader: string, secret: strin
   }
 }
 
-async function processWebhookPayload(payload: unknown, rawBody: string) {
+async function processWebhookPayload(payload: unknown) {
+  const values = extractMessageValues(payload);
+  console.info("wa_webhook values=", values.length);
   const messages = extractMessages(payload);
+  console.info("wa_webhook messages=", messages.length);
+  if (messages.length > 0) {
+    const first = messages[0];
+    console.info("wa_webhook first_message=", first.message_id, buildCorrelationId(first.from, first.message_id));
+  }
   if (messages.length === 0) return;
 
   for (const message of messages) {
@@ -286,7 +316,8 @@ async function processWebhookPayload(payload: unknown, rawBody: string) {
       correlation_id: deal_id,
       shop: null,
       data: {
-        message: message.raw,
+        message: message.raw_message,
+        value: message.raw_value,
         payload,
       },
     };
@@ -343,7 +374,7 @@ async function processWebhookPayload(payload: unknown, rawBody: string) {
         const check = buildCheckMessage({
           deal_id,
           draft_version: existing.draft_version,
-          draft,
+          draft: mergedDraft,
         });
 
         mergedDraft.provenance = {
@@ -419,7 +450,7 @@ export async function POST(request: Request) {
 
   try {
     const payload = JSON.parse(rawBody) as unknown;
-    void processWebhookPayload(payload, rawBody).catch(async (error) => {
+    void processWebhookPayload(payload).catch(async (error) => {
       const message = error instanceof Error ? error.message : "Failed to process webhook payload";
       await logError({
         correlation_id: "unknown",
