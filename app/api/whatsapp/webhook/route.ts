@@ -1,12 +1,14 @@
 import { NextResponse } from "next/server";
 import crypto from "crypto";
 import { buildCheckMessage } from "@/src/hotbags/checkMessages";
+import { renderCheckText } from "@/src/hotbags/renderCheckText";
 import {
   BagStyleEnum,
   CurrencyEnum,
   DraftProductSchema,
   type DraftProduct,
 } from "@/src/hotbags/schema";
+import { sendTextMessage } from "@/src/whatsapp/client";
 import { createDealSession, getDealSession, logError, logEvent, updateDealSession } from "@/src/platform/db";
 import type { AutomationEventEnvelope } from "@/src/platform/types";
 
@@ -269,6 +271,17 @@ function buildSourceText(message: ExtractedMessage): string {
   return `[type:${message.type}]`;
 }
 
+function getRecipientId(message: ExtractedMessage): string {
+  const contacts = message.raw_value.contacts;
+  if (Array.isArray(contacts)) {
+    const first = contacts[0] as { wa_id?: unknown } | undefined;
+    if (first && typeof first.wa_id === "string") {
+      return first.wa_id;
+    }
+  }
+  return message.from;
+}
+
 function mergeSourceText(existing: string | undefined, next: string): string {
   if (!existing) return next;
   if (existing.includes(next)) return existing;
@@ -400,6 +413,34 @@ async function processWebhookPayload(payload: unknown) {
           expires_at: expiresAt,
         });
         console.info("wa_webhook session_saved", { deal_id, draft_version: 1 });
+
+        if (message.type === "text") {
+          const recipient = getRecipientId(message);
+          try {
+            if (!process.env.WHATSAPP_TOKEN || !process.env.WHATSAPP_PHONE_NUMBER_ID) {
+              console.info("wa_send_check_skipped", {
+                deal_id,
+                reason: "missing_env",
+              });
+              return;
+            }
+            console.info("wa_send_check_start", { deal_id, to: recipient });
+            await sendTextMessage({
+              phoneNumberId: process.env.WHATSAPP_PHONE_NUMBER_ID,
+              token: process.env.WHATSAPP_TOKEN,
+              to: recipient,
+              body: renderCheckText(check),
+              apiVersion: process.env.WHATSAPP_API_VERSION ?? "v24.0",
+            });
+            console.info("wa_send_check_ok", { deal_id, to: recipient });
+          } catch (error) {
+            console.error("wa_send_check_error", {
+              deal_id,
+              to: recipient,
+              error: error instanceof Error ? error.message : String(error),
+            });
+          }
+        }
       } else {
         console.info("wa_webhook before_session_write", { deal_id });
         const draft = DraftProductSchema.parse(existing.draft_product ?? {});
@@ -441,6 +482,34 @@ async function processWebhookPayload(payload: unknown) {
           updated_at: new Date().toISOString(),
         });
         console.info("wa_webhook session_saved", { deal_id, draft_version: existing.draft_version });
+
+        if (message.type === "text") {
+          const recipient = getRecipientId(message);
+          try {
+            if (!process.env.WHATSAPP_TOKEN || !process.env.WHATSAPP_PHONE_NUMBER_ID) {
+              console.info("wa_send_check_skipped", {
+                deal_id,
+                reason: "missing_env",
+              });
+              return;
+            }
+            console.info("wa_send_check_start", { deal_id, to: recipient });
+            await sendTextMessage({
+              phoneNumberId: process.env.WHATSAPP_PHONE_NUMBER_ID,
+              token: process.env.WHATSAPP_TOKEN,
+              to: recipient,
+              body: renderCheckText(check),
+              apiVersion: process.env.WHATSAPP_API_VERSION ?? "v24.0",
+            });
+            console.info("wa_send_check_ok", { deal_id, to: recipient });
+          } catch (error) {
+            console.error("wa_send_check_error", {
+              deal_id,
+              to: recipient,
+              error: error instanceof Error ? error.message : String(error),
+            });
+          }
+        }
       }
     } catch (error) {
       const messageText = error instanceof Error ? error.message : "Failed to process WhatsApp message";
