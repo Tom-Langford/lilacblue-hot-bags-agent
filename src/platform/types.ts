@@ -1,6 +1,6 @@
 // src/platform/types.ts
 
-export type EventSource = "whatsapp" | "shopify" | "mechanic" | "internal";
+export type EventSource = "whatsapp" | "clawdbot" | "shopify" | "mechanic" | "internal";
 
 export type AutomationEventEnvelope<TData = unknown> = {
   event_id: string;
