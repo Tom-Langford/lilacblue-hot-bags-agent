@@ -3,6 +3,13 @@ import { z } from "zod";
 import { buildCorrelationId } from "@/src/hotbags/draftFromSource";
 import { renderCheckText } from "@/src/hotbags/renderCheckText";
 import { processInboundMessage } from "@/src/integrations/whatsapp/processInbound";
+import {
+  verifyBearer,
+  verifyHmac,
+  getIdempotencyKey,
+  getAuthFailureDebug,
+  getBearerToken,
+} from "@/src/integrations/whatsapp/inboundAuth";
 import { logError } from "@/src/platform/db";
 
 export const runtime = "nodejs";
@@ -39,26 +46,43 @@ function buildSourceText(payload: z.infer<typeof InboundPayloadSchema>): string 
   return "[type:unknown]";
 }
 
-function verifyBearer(request: Request): boolean {
-  const token = process.env.WHATSAPP_GATEWAY_TOKEN;
-  if (!token) return false;
-  const auth = request.headers.get("authorization");
-  if (!auth?.startsWith("Bearer ")) return false;
-  const provided = auth.slice(7);
-  return provided === token && provided.length > 0;
-}
-
 export async function POST(request: Request) {
-  if (!verifyBearer(request)) {
+  const rawBody = await request.text();
+
+  const bearerResult = verifyBearer(request);
+  if (!bearerResult.ok) {
+    const bearerToken = getBearerToken();
+    const debug = getAuthFailureDebug(request, rawBody, bearerToken, undefined, false);
+    debug.failure_reason = bearerResult.reason;
+    console.warn("whatsapp/inbound auth_fail", debug);
+    return NextResponse.json({ ok: false, error: "Unauthorized" }, { status: 401 });
+  }
+
+  const hmacResult = verifyHmac(request, rawBody);
+  if (!hmacResult.ok) {
+    if (hmacResult.reason === "config_missing_secret") {
+      console.error(
+        "whatsapp/inbound: HOTBAGS_HMAC_SECRET is required when HOTBAGS_HMAC_DISABLED is not true"
+      );
+      return NextResponse.json(
+        { ok: false, error: "Server configuration error: HMAC secret not configured" },
+        { status: 500 }
+      );
+    }
+    const bearerToken = getBearerToken();
+    const hmacSecret = process.env.HOTBAGS_HMAC_SECRET?.trim();
+    const debug = getAuthFailureDebug(request, rawBody, bearerToken, hmacSecret, false);
+    debug.failure_reason = hmacResult.reason;
+    console.warn("whatsapp/inbound auth_fail", debug);
     return NextResponse.json(
-      { ok: false, error: "Unauthorized" },
-      { status: 401 }
+      { ok: false, error: "Invalid signature" },
+      { status: 403 }
     );
   }
 
   let body: unknown;
   try {
-    body = await request.json();
+    body = JSON.parse(rawBody);
   } catch {
     return NextResponse.json(
       { ok: false, error: "Invalid JSON body" },
@@ -75,8 +99,7 @@ export async function POST(request: Request) {
   }
 
   const payload = parsed.data;
-  const event_id =
-    request.headers.get("idempotency-key")?.trim() || payload.message_id;
+  const event_id = getIdempotencyKey(request, payload);
   const deal_id = buildCorrelationId(payload.from, payload.message_id);
   const source_text = buildSourceText(payload);
   const occurred_at = toOccurredAt(payload.timestamp);

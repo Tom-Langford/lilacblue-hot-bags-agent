@@ -13,7 +13,10 @@ When Meta hits the verification endpoint, the server responds with the `hub.chal
 For the transport-neutral inbound path (e.g. ClawdBot on an always-on VM):
 
 - **Endpoint:** `POST /api/integrations/whatsapp/inbound`
-- **Auth:** Set `WHATSAPP_GATEWAY_TOKEN` in the environment. The Gateway must send `Authorization: Bearer <token>`.
+- **Auth:**
+  - `HOTBAGS_BEARER_TOKEN` (required): Gateway sends `Authorization: Bearer <token>`.
+  - `HOTBAGS_HMAC_SECRET` (required unless disabled): Gateway sends `X-HotBags-Signature: sha256=<hex>` where hex = HMAC-SHA256(raw request body UTF-8, secret).
+  - `HOTBAGS_HMAC_DISABLED` (optional): Set to `true` or `1` to skip HMAC verification. Default: `false`.
 - **Body:** Normalized payload with `message_id`, `from`, `text`, `media` (optional), `timestamp`, and optional `transport_session_id`, `raw`.
 - **Response:** `{ ok: true, commands: [ { command_id, type: "send_text", text } ] }`. The Gateway dedupes by `command_id` and sends at most once per command.
-- **Idempotency:** Use `message_id` as the idempotency key (or send `Idempotency-Key` header). Events are logged with `source: "clawdbot"`.
+- **Idempotency:** Use `message_id` as the idempotency key, or send `Idempotency-Key` or `X-Idempotency-Key` header. Events are logged with `source: "clawdbot"`.

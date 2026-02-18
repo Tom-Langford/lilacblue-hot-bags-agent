@@ -58,7 +58,7 @@ The VM must run a “gateway” that (1) receives every inbound WhatsApp message
 **Option A – Standalone gateway (recommended)**  
 - A small Node service that uses **Baileys** (or the same WhatsApp Web stack OpenClaw uses) to maintain a single WhatsApp session. No OpenClaw dependency.  
 - On each inbound message: build the normalized payload (`message_id`, `chat_id`, `from`, `text`, `media[]`, `timestamp`, `raw`), POST to `https://<hot-bags>/api/integrations/whatsapp/inbound` with:
-  - **Headers:** Auth (HMAC or `Authorization: Bearer <shared token>`), `Idempotency-Key: <message_id>` (or as agreed in contract), optional `X-Transport-Session-Id`.
+  - **Headers:** `Authorization: Bearer <HOTBAGS_BEARER_TOKEN>`, `X-HotBags-Signature: sha256=<hex>` (unless HMAC disabled), `Idempotency-Key` or `X-Idempotency-Key: <message_id>`, optional `X-Transport-Session-Id`.
   - **Body:** JSON matching the Hot Bags contract.
 - On **2xx response:** Parse `commands[]`. For each command with `command_id`, check a local dedupe store (e.g. SQLite or file); if not seen, execute (e.g. `type: "send_text"` → send text to `from`/chat), then record `command_id` as executed.
 - On **non-2xx or network error:** Push payload (and idempotency key) to a retry queue. Background worker retries with backoff; same idempotency key yields same response and same `command_id`s, so command dedupe still prevents double-send after retry.
@@ -72,10 +72,11 @@ The VM must run a “gateway” that (1) receives every inbound WhatsApp message
 
 ## 4. Auth and secrets (Gateway → Hot Bags)
 
+- **Hot Bags env vars:** `HOTBAGS_BEARER_TOKEN` (required), `HOTBAGS_HMAC_SECRET` (required unless `HOTBAGS_HMAC_DISABLED=true`), `HOTBAGS_HMAC_DISABLED` (optional; `true`/`1` to skip HMAC).
 - **Authentication:** Align with Hot Bags:
-  - **HMAC:** Gateway signs each request (e.g. body + idempotency key) with a shared secret; Hot Bags verifies. Store the secret in env or a vault; never in code.
-  - **Bearer token:** Shared token in `Authorization: Bearer <token>`. Same storage rules.
-- **Replay protection:** Hot Bags uses idempotency key (e.g. `message_id`); Gateway sends it on every POST (body or header). Optional timestamp window enforced by Hot Bags.
+  - **Bearer token:** `Authorization: Bearer <token>`. Must match `HOTBAGS_BEARER_TOKEN`.
+  - **HMAC:** Gateway sends `X-HotBags-Signature: sha256=<hex>` where hex = HMAC-SHA256(raw request body UTF-8, `HOTBAGS_HMAC_SECRET`). Hot Bags verifies. If `HOTBAGS_HMAC_DISABLED` is not set, HMAC is required.
+- **Replay protection:** Hot Bags uses idempotency key (e.g. `message_id`); Gateway sends it via `Idempotency-Key` or `X-Idempotency-Key` header.
 - **Secrets on Oracle VM:** Use instance metadata or a small secrets store; inject into the gateway process via env or env file with restricted permissions (e.g. `chmod 600 .env`).
 
 ---
@@ -112,7 +113,7 @@ The VM must run a “gateway” that (1) receives every inbound WhatsApp message
 2. **Install Node 22+ and OpenClaw** (or only Node + Baileys for Option A); ensure PATH and user permissions.
 3. **Configure WhatsApp:** `openclaw.json` (or equivalent) with WhatsApp/web channel and allowlist; link session via `openclaw channels login --channel whatsapp`.
 4. **Implement or deploy gateway service:** Inbound message → build payload → POST to Hot Bags with auth + idempotency key; parse `commands[]`, dedupe by `command_id`, execute send_text; retry queue for failures.
-5. **Secrets:** Store Hot Bags shared secret (HMAC or bearer) and any API URLs in env/vault; configure gateway to use them.
+5. **Secrets:** Store `HOTBAGS_BEARER_TOKEN`, `HOTBAGS_HMAC_SECRET` (unless disabled), and any API URLs in env/vault; configure gateway to use them.
 6. **Systemd (or equivalent):** Run gateway (and OpenClaw if used) under a dedicated user with Restart=always; use env file for secrets.
 7. **Verify end-to-end:** Send a test WhatsApp message, confirm Hot Bags receives it (check Supabase event + deal), confirm reply appears in WhatsApp exactly once after retries.
 8. **Document:** Where auth dir lives, how to re-scan QR, how to inspect retry queue and command_id store, and how Hot Bags contract is versioned (if ever).
