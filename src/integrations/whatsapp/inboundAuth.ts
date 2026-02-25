@@ -16,7 +16,12 @@ export type VerifyResult = { ok: boolean; reason: string };
 
 function isHmacDisabled(): boolean {
   const v = process.env[HMAC_DISABLED_ENV]?.toLowerCase().trim();
-  return v === "true" || v === "1";
+  if (v === "true" || v === "1") return true;
+  // Explicitly want HMAC — don't use fallback
+  if (v === "false" || v === "0") return false;
+  // Fallback: env unset and no secret — can't verify, treat as disabled (common for preview deploys)
+  if (!process.env[HMAC_SECRET_ENV]?.trim()) return true;
+  return false;
 }
 
 export function getBearerToken(): string | undefined {

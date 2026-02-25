@@ -60,13 +60,6 @@ export async function handleInboundPost(
   const { logTag } = options;
   const rawBody = await request.text();
 
-  // DEBUG: remove after confirming HMAC_DISABLED works
-  console.log("gateway/inbound env", {
-    HOTBAGS_HMAC_DISABLED: process.env.HOTBAGS_HMAC_DISABLED,
-    hmacDisabled: process.env.HOTBAGS_HMAC_DISABLED?.toLowerCase().trim() === "true" ||
-      process.env.HOTBAGS_HMAC_DISABLED?.toLowerCase().trim() === "1",
-  });
-
   const bearerResult = verifyBearer(request);
   if (!bearerResult.ok) {
     const bearerToken = getBearerToken();
