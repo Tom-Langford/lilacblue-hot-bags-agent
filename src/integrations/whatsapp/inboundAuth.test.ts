@@ -112,11 +112,11 @@ describe("inboundAuth", () => {
       expect(verifyHmac(req, rawBody)).toEqual({ ok: false, reason: "signature_mismatch" });
     });
 
-    it("returns signature_missing when header absent", () => {
+    it("returns ok (no_signature) when header absent — HMAC optional", () => {
       process.env[HMAC_SECRET] = "my-secret";
       process.env[HMAC_DISABLED] = "false";
       const req = makeRequest();
-      expect(verifyHmac(req, rawBody)).toEqual({ ok: false, reason: "signature_missing" });
+      expect(verifyHmac(req, rawBody)).toEqual({ ok: true, reason: "no_signature" });
     });
 
     it("returns config_missing_secret when secret not set and not disabled", () => {

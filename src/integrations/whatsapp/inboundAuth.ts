@@ -72,15 +72,18 @@ export function verifyBearer(request: Request): VerifyResult {
 /**
  * Verifies X-HotBags-Signature: sha256=<hex> against HMAC-SHA256(rawBody, HOTBAGS_HMAC_SECRET).
  * If HOTBAGS_HMAC_DISABLED=true, returns ok without verification.
+ * If signature header is missing, skips verification (HMAC optional; Bearer alone is sufficient).
  */
 export function verifyHmac(request: Request, rawBody: string): VerifyResult {
   if (isHmacDisabled()) return { ok: true, reason: "disabled" };
 
+  const sig = request.headers.get("x-hotbags-signature");
+  // No signature sent — skip HMAC (Bearer-only auth is sufficient)
+  if (!sig) return { ok: true, reason: "no_signature" };
+
   const hmacSecret = process.env[HMAC_SECRET_ENV]?.trim();
   if (!hmacSecret) return { ok: false, reason: "config_missing_secret" };
 
-  const sig = request.headers.get("x-hotbags-signature");
-  if (!sig) return { ok: false, reason: "signature_missing" };
   if (!verifyHmacSignature(rawBody, sig, hmacSecret)) return { ok: false, reason: "signature_mismatch" };
 
   return { ok: true, reason: "ok" };
