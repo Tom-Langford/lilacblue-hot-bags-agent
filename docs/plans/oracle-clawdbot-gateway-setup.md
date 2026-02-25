@@ -72,10 +72,10 @@ The VM must run a “gateway” that (1) receives every inbound WhatsApp message
 
 ## 4. Auth and secrets (Gateway → Hot Bags)
 
-- **Hot Bags env vars:** `HOTBAGS_BEARER_TOKEN` (required), `HOTBAGS_HMAC_SECRET` (required unless `HOTBAGS_HMAC_DISABLED=true`), `HOTBAGS_HMAC_DISABLED` (optional; `true`/`1` to skip HMAC).
+- **Hot Bags env vars:** `HOTBAGS_BEARER_TOKEN` (required). `HOTBAGS_HMAC_SECRET` and `HOTBAGS_HMAC_DISABLED=false` only if you want HMAC (default: HMAC off).
 - **Authentication:** Align with Hot Bags:
   - **Bearer token:** `Authorization: Bearer <token>`. Must match `HOTBAGS_BEARER_TOKEN`.
-  - **HMAC:** Gateway sends `X-HotBags-Signature: sha256=<hex>` where hex = HMAC-SHA256(raw request body UTF-8, `HOTBAGS_HMAC_SECRET`). Hot Bags verifies. If `HOTBAGS_HMAC_DISABLED` is not set, HMAC is required.
+  - **HMAC:** Optional. Default: disabled. To enable, set `HOTBAGS_HMAC_DISABLED=false` and `HOTBAGS_HMAC_SECRET`. Gateway sends `X-HotBags-Signature: sha256=<hex>`.
 - **Replay protection:** Hot Bags uses idempotency key (e.g. `message_id`); Gateway sends it via `Idempotency-Key` or `X-Idempotency-Key` header.
 - **Secrets on Oracle VM:** Use instance metadata or a small secrets store; inject into the gateway process via env or env file with restricted permissions (e.g. `chmod 600 .env`).
 

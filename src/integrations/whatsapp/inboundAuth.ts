@@ -3,8 +3,9 @@ import crypto from "crypto";
 /**
  * Auth env vars (standardized to match gateway):
  * - HOTBAGS_BEARER_TOKEN: required. Gateway sends Authorization: Bearer <token>.
- * - HOTBAGS_HMAC_SECRET: required unless HOTBAGS_HMAC_DISABLED=true. HMAC over raw body UTF-8.
- * - HOTBAGS_HMAC_DISABLED: optional; true/false/1/0; default false.
+ * - HOTBAGS_HMAC_SECRET: required when HMAC enabled. HMAC over raw body UTF-8.
+ * - HOTBAGS_HMAC_DISABLED: optional; true/false/1/0. Default true (HMAC off) so Bearer-only works
+ *   without env vars in Vercel Preview. Set to "false" to require HMAC.
  * Legacy: WHATSAPP_GATEWAY_TOKEN fallback if HOTBAGS_BEARER_TOKEN not set (deprecated).
  */
 const BEARER_ENV = "HOTBAGS_BEARER_TOKEN";
@@ -16,12 +17,10 @@ export type VerifyResult = { ok: boolean; reason: string };
 
 function isHmacDisabled(): boolean {
   const v = process.env[HMAC_DISABLED_ENV]?.toLowerCase().trim();
-  if (v === "true" || v === "1") return true;
-  // Explicitly want HMAC — don't use fallback
+  // Explicitly require HMAC
   if (v === "false" || v === "0") return false;
-  // Fallback: env unset and no secret — can't verify, treat as disabled (common for preview deploys)
-  if (!process.env[HMAC_SECRET_ENV]?.trim()) return true;
-  return false;
+  // Default: HMAC disabled (Bearer-only). Env often unavailable in Vercel Preview.
+  return true;
 }
 
 export function getBearerToken(): string | undefined {
